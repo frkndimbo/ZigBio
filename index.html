@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Fluid Dynamics</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #e0e0e0;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+            color: #111;
+        }
+
+        #canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        .ui-layer {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+        }
+
+        .header {
+            position: absolute;
+            top: 40px;
+            left: 40px;
+            pointer-events: auto;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -1px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            border-bottom: 3px solid #111;
+            display: inline-block;
+            padding-bottom: 4px;
+        }
+
+        .header p {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 8px;
+        }
+
+        .social-links {
+            position: absolute;
+            bottom: 40px;
+            left: 40px;
+            pointer-events: auto;
+        }
+
+        .social-links a {
+            display: block;
+            font-size: 12px;
+            text-decoration: none;
+            color: #111;
+            border-bottom: 1px solid #111;
+            margin-bottom: 6px;
+            padding-bottom: 2px;
+            transition: opacity 0.2s;
+        }
+
+        .social-links a:hover {
+            opacity: 0.5;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            text-align: right;
+            font-size: 11px;
+            opacity: 0.6;
+        }
+
+        .status {
+            position: absolute;
+            top: 40px;
+            right: 40px;
+            font-size: 11px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <div class="ui-layer">
+        <div class="header">
+            <h1>FLUID_DYNAMICS</h1>
+            <p>Interactive Eulerian Grid Simulation</p>
+            <p>Click & Drag to disturb the field</p>
+        </div>
+
+        <div class="social-links">
+            <a href="https://github.com" target="_blank">GITHUB →</a>
+            <a href="https://twitter.com" target="_blank">TWITTER →</a>
+            <a href="mailto:hello@example.com">EMAIL →</a>
+        </div>
+
+        <div class="controls">
+            <div>RESOLUTION: 128×128</div>
+            <div>DIFFUSION: 0.00001</div>
+            <div>VISCOSITY: 0.000001</div>
+        </div>
+
+        <div class="status" id="status">Initializing...</div>
+    </div>
+
+    <script>
+        const GRID_SIZE = 128;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+
+        let wasm, memory, densityPtr;
+        let imageData, data;
+        let animationId;
+
+        // Resize canvas to full screen
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            imageData = ctx.createImageData(GRID_SIZE, GRID_SIZE);
+            data = imageData.data;
+        }
+
+        resize();
+        window.addEventListener('resize', resize);
+
+        // Initialize WASM
+        async function initWasm() {
+            try {
+                const response = await fetch('zig-out/bin/fluid.wasm');
+                const { instance } = await WebAssembly.instantiateStreaming(response, {
+                    env: {
+                        memory: new WebAssembly.Memory({ initial: 10 })
+                    }
+                });
+
+                wasm = instance.exports;
+                memory = wasm.memory;
+
+                // Initialize fluid grid
+                wasm.init();
+
+                // Get density pointer
+                densityPtr = wasm.getDensityPtr();
+
+                statusEl.textContent = 'RUNNING';
+
+                startRenderLoop();
+                setupInteractions();
+            } catch (err) {
+                statusEl.textContent = 'ERROR: ' + err.message;
+                console.error(err);
+            }
+        }
+
+        // Render loop
+        function startRenderLoop() {
+            function render() {
+                // Step simulation
+                wasm.step();
+
+                // Get density array from WASM memory
+                const densityArray = new Float32Array(memory.buffer, densityPtr, (GRID_SIZE + 2) * (GRID_SIZE + 2));
+
+                // Render to canvas
+                for (let y = 1; y <= GRID_SIZE; y++) {
+                    for (let x = 1; x <= GRID_SIZE; x++) {
+                        const idx = x + (GRID_SIZE + 2) * y;
+                        const density = densityArray[idx];
+
+                        // Clamp and scale density
+                        const val = Math.min(255, Math.max(0, density * 2));
+
+                        // Set pixel color (black fluid on light gray background)
+                        const pixelIdx = ((y - 1) * GRID_SIZE + (x - 1)) * 4;
+                        data[pixelIdx] = 0;         // R
+                        data[pixelIdx + 1] = 0;     // G
+                        data[pixelIdx + 2] = 0;     // B
+                        data[pixelIdx + 3] = val;   // Alpha
+                    }
+                }
+
+                // Draw to canvas, scaling up to full screen
+                ctx.fillStyle = '#e0e0e0';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Create temporary canvas for pixel data
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = GRID_SIZE;
+                tempCanvas.height = GRID_SIZE;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.putImageData(imageData, 0, 0);
+
+                // Draw scaled up with nearest neighbor for crisp pixels
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+
+                animationId = requestAnimationFrame(render);
+            }
+
+            render();
+        }
+
+        // Mouse/Touch interaction
+        function setupInteractions() {
+            let isDragging = false;
+            let lastX = 0;
+            let lastY = 0;
+
+            function getGridCoords(clientX, clientY) {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = GRID_SIZE / rect.width;
+                const scaleY = GRID_SIZE / rect.height;
+                const x = Math.floor((clientX - rect.left) * scaleX) + 1;
+                const y = Math.floor((clientY - rect.top) * scaleY) + 1;
+                return { x: Math.max(1, Math.min(GRID_SIZE, x)), y: Math.max(1, Math.min(GRID_SIZE, y)) };
+            }
+
+            function addFluid(x, y, vx, vy) {
+                // Add density in a small radius
+                for (let dy = -2; dy <= 2; dy++) {
+                    for (let dx = -2; dx <= 2; dx++) {
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist <= 2.5) {
+                            const amount = 50 * (1 - dist / 2.5);
+                            const gx = x + dx;
+                            const gy = y + dy;
+                            if (gx >= 1 && gx <= GRID_SIZE && gy >= 1 && gy <= GRID_SIZE) {
+                                wasm.addDensity(gx, gy, amount);
+                            }
+                        }
+                    }
+                }
+                wasm.addVelocity(x, y, vx * 0.5, vy * 0.5);
+            }
+
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                const { x, y } = getGridCoords(e.clientX, e.clientY);
+                lastX = x;
+                lastY = y;
+                addFluid(x, y, 0, 0);
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const { x, y } = getGridCoords(e.clientX, e.clientY);
+                const vx = (x - lastX) * 5;
+                const vy = (y - lastY) * 5;
+                addFluid(x, y, vx, vy);
+                lastX = x;
+                lastY = y;
+            });
+
+            canvas.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                isDragging = false;
+            });
+
+            // Touch events
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                isDragging = true;
+                const touch = e.touches[0];
+                const { x, y } = getGridCoords(touch.clientX, touch.clientY);
+                lastX = x;
+                lastY = y;
+                addFluid(x, y, 0, 0);
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!isDragging) return;
+                const touch = e.touches[0];
+                const { x, y } = getGridCoords(touch.clientX, touch.clientY);
+                const vx = (x - lastX) * 5;
+                const vy = (y - lastY) * 5;
+                addFluid(x, y, vx, vy);
+                lastX = x;
+                lastY = y;
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', () => {
+                isDragging = false;
+            });
+        }
+
+        // Start
+        initWasm();
+    </script>
+</body>
+</html>
