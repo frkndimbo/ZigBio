@@ -1,10 +1,10 @@
 # ZigBio
 
-ZigBio is a small static bio page that renders an interactive fluid simulation in Zig compiled to WebAssembly. The app is intentionally simple: one HTML file, one Zig simulation module, and no JavaScript framework.
+ZigBio is a static GBA-style bio game. The game core runs in Zig compiled to WebAssembly: movement, camera, proximity triggers, ripple particles, and the water simulation live in `fluid.zig`. JavaScript is kept as the browser shell for input, Canvas 2D rendering, and navigation.
 
 ## Current Decision
 
-Keep this project as a static Zig/WASM page. The best upgrade path is not a framework rewrite; it is to strengthen the simulation logic, add repeatable build/test gates, and deploy the generated `zig-out/` directory to static hosting.
+Keep this project static and performance-first. Do not add a frontend framework or backend service. The browser should load a small WASM core and static files from `zig-out/`.
 
 ## Requirements
 
@@ -28,6 +28,9 @@ The deployable output is written to:
 ```text
 zig-out/
 ├── index.html
+├── game.js
+├── preloader.js
+├── style.css
 └── bin/fluid.wasm
 ```
 
