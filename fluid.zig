@@ -1,8 +1,8 @@
 const std = @import("std");
 
 const Screen = struct {
-    const width: f32 = 240.0;
-    const height: f32 = 160.0;
+    const width: usize = 240;
+    const height: usize = 160;
 };
 
 const World = struct {
@@ -16,6 +16,12 @@ const ITER: usize = 4;
 const HOUSE_COUNT: usize = 5;
 const RIPPLE_COUNT: usize = 72;
 const PARTICLE_COUNT: usize = 72;
+const FRAMEBUFFER_SIZE: usize = Screen.width * Screen.height;
+const PALETTE_SIZE: usize = 256;
+
+const BUTTON_ACCEPT: u32 = 1 << 0;
+const BUTTON_CANCEL: u32 = 1 << 1;
+const BUTTON_REDUCED_MOTION: u32 = 1 << 2;
 
 const PLAYER_SPEED: f32 = 74.0;
 const TRIGGER_RADIUS: f32 = 78.0;
@@ -70,6 +76,8 @@ const houses = [_]House{
     .{ .x = 650.0, .y = 535.0, .radius = TRIGGER_RADIUS },
 };
 
+const routes = [_]usize{ 0, 1, 2, 4, 3, 0 };
+
 var player: Player = undefined;
 var camera: [2]f32 = .{ 0.0, 0.0 };
 var active_house: i32 = -1;
@@ -91,7 +99,19 @@ var player_view: [6]f32 = undefined;
 var ripple_view: [RIPPLE_COUNT * 5]f32 = undefined;
 var particle_view: [PARTICLE_COUNT * 5]f32 = undefined;
 
+var palette: [PALETTE_SIZE]u16 = [_]u16{0} ** PALETTE_SIZE;
+var framebuffer: [FRAMEBUFFER_SIZE]u16 = [_]u16{0} ** FRAMEBUFFER_SIZE;
+
+var input_axis_x: f32 = 0.0;
+var input_axis_y: f32 = 0.0;
+var input_buttons: u32 = 0;
+var render_clock: f32 = 0.0;
+
 fn clamp(value: f32, min: f32, max: f32) f32 {
+    return @max(min, @min(max, value));
+}
+
+fn clampI(value: i32, min: i32, max: i32) i32 {
     return @max(min, @min(max, value));
 }
 
@@ -103,6 +123,43 @@ fn distance(ax: f32, ay: f32, bx: f32, by: f32) f32 {
     const dx = ax - bx;
     const dy = ay - by;
     return @sqrt(dx * dx + dy * dy);
+}
+
+fn rgb555(r: u8, g: u8, b: u8) u16 {
+    const rr: u16 = @as(u16, r) >> 3;
+    const gg: u16 = @as(u16, g) >> 3;
+    const bb: u16 = @as(u16, b) >> 3;
+    return rr | (gg << 5) | (bb << 10);
+}
+
+fn initPalette() void {
+    palette[0] = rgb555(20, 40, 52);
+    palette[1] = rgb555(23, 78, 110);
+    palette[2] = rgb555(30, 98, 138);
+    palette[3] = rgb555(43, 118, 162);
+    palette[4] = rgb555(58, 142, 180);
+    palette[5] = rgb555(99, 176, 201);
+    palette[6] = rgb555(128, 206, 217);
+    palette[7] = rgb555(160, 231, 225);
+    palette[8] = rgb555(16, 32, 40);
+    palette[9] = rgb555(48, 70, 86);
+    palette[10] = rgb555(92, 55, 37);
+    palette[11] = rgb555(132, 79, 51);
+    palette[12] = rgb555(169, 113, 69);
+    palette[13] = rgb555(214, 156, 94);
+    palette[14] = rgb555(56, 62, 73);
+    palette[15] = rgb555(128, 136, 152);
+    palette[16] = rgb555(186, 194, 205);
+    palette[17] = rgb555(204, 170, 112);
+    palette[18] = rgb555(238, 202, 131);
+    palette[19] = rgb555(238, 207, 165);
+    palette[20] = rgb555(132, 60, 78);
+    palette[21] = rgb555(255, 244, 208);
+    palette[22] = rgb555(226, 115, 145);
+    palette[23] = rgb555(74, 92, 109);
+    palette[24] = rgb555(177, 86, 65);
+    palette[25] = rgb555(211, 115, 82);
+    palette[26] = rgb555(62, 54, 61);
 }
 
 fn syncHouseView() void {
@@ -170,6 +227,253 @@ fn resetEffects() void {
     }
 }
 
+fn reducedMotionEnabled() bool {
+    return (input_buttons & BUTTON_REDUCED_MOTION) != 0;
+}
+
+fn fbOffset(x: i32, y: i32) ?usize {
+    if (x < 0 or y < 0) return null;
+    if (x >= Screen.width or y >= Screen.height) return null;
+    return @as(usize, @intCast(x)) + @as(usize, @intCast(y)) * Screen.width;
+}
+
+fn setPixel(x: i32, y: i32, palette_index: u8) void {
+    const offset = fbOffset(x, y) orelse return;
+    framebuffer[offset] = palette[palette_index];
+}
+
+fn fillRect(x: i32, y: i32, w: i32, h: i32, palette_index: u8) void {
+    if (w <= 0 or h <= 0) return;
+    const min_x = clampI(x, 0, Screen.width);
+    const min_y = clampI(y, 0, Screen.height);
+    const max_x = clampI(x + w, 0, Screen.width);
+    const max_y = clampI(y + h, 0, Screen.height);
+    if (min_x >= max_x or min_y >= max_y) return;
+
+    var py = min_y;
+    while (py < max_y) : (py += 1) {
+        const row_base = @as(usize, @intCast(py)) * Screen.width;
+        var px = min_x;
+        while (px < max_x) : (px += 1) {
+            const offset = row_base + @as(usize, @intCast(px));
+            framebuffer[offset] = palette[palette_index];
+        }
+    }
+}
+
+fn drawFrameRect(x: i32, y: i32, w: i32, h: i32, palette_index: u8) void {
+    fillRect(x, y, w, 1, palette_index);
+    fillRect(x, y + h - 1, w, 1, palette_index);
+    fillRect(x, y, 1, h, palette_index);
+    fillRect(x + w - 1, y, 1, h, palette_index);
+}
+
+fn drawRouteDots() void {
+    var route_i: usize = 1;
+    while (route_i < routes.len) : (route_i += 1) {
+        const from = houses[routes[route_i - 1]];
+        const to = houses[routes[route_i]];
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const distance_len = @sqrt(dx * dx + dy * dy);
+        const steps = @max(@as(usize, 1), @as(usize, @intFromFloat(distance_len / 40.0)));
+
+        var step: usize = 1;
+        while (step <= steps) : (step += 1) {
+            const t = @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(steps + 1));
+            const world_x = from.x + dx * t;
+            const world_y = from.y + dy * t;
+            const sx = @as(i32, @intFromFloat(world_x - camera[0]));
+            const sy = @as(i32, @intFromFloat(world_y - camera[1]));
+            fillRect(sx, sy, 2, 2, 5);
+        }
+    }
+}
+
+fn drawHouse(index: usize) void {
+    const house = houses[index];
+    const sx = @as(i32, @intFromFloat(house.x - camera[0]));
+    const sy = @as(i32, @intFromFloat(house.y - camera[1]));
+
+    const bob_phase = render_clock * 2.0 + @as(f32, @floatFromInt(index));
+    const bob = @as(i32, @intFromFloat(@sin(bob_phase) * 2.0));
+
+    const dock_width: i32 = if (index == 4) 62 else 54;
+    const dock_x = sx - @divTrunc(dock_width, 2);
+    const dock_y = sy + 10 + bob;
+
+    fillRect(dock_x - 2, dock_y + 15, dock_width + 4, 3, 8);
+    fillRect(dock_x, dock_y, dock_width, 14, 11);
+
+    var plank_x = dock_x + 3;
+    while (plank_x < dock_x + dock_width - 4) : (plank_x += 12) {
+        fillRect(plank_x, dock_y + 1, 7, 11, 13);
+    }
+
+    const house_w: i32 = if (index == 4) 44 else 38;
+    const house_h: i32 = if (index == 4) 24 else 28;
+    const house_x = sx - @divTrunc(house_w, 2);
+    const house_y = dock_y - house_h;
+
+    const body_color: u8 = if (index % 2 == 0) 24 else 14;
+    const roof_color: u8 = if (index % 2 == 0) 25 else 15;
+
+    fillRect(house_x, house_y, house_w, house_h, body_color);
+    drawFrameRect(house_x, house_y, house_w, house_h, 8);
+
+    var roof_row: i32 = 0;
+    while (roof_row < 9) : (roof_row += 1) {
+        const shrink = roof_row * 2;
+        fillRect(house_x + shrink, house_y - 9 + roof_row, house_w - shrink * 2, 1, roof_color);
+    }
+
+    const door_w: i32 = 7;
+    fillRect(sx - @divTrunc(door_w, 2), house_y + house_h - 11, door_w, 10, 8);
+    fillRect(sx - @divTrunc(door_w, 2) + 1, house_y + house_h - 10, door_w - 2, 9, 26);
+
+    fillRect(house_x + 4, house_y + 8, 6, 5, 15);
+    fillRect(house_x + house_w - 10, house_y + 8, 6, 5, 15);
+
+    if (active_house == @as(i32, @intCast(index))) {
+        fillRect(sx - 9, house_y - 14, 18, 10, 8);
+        fillRect(sx - 8, house_y - 13, 16, 8, 17 + @as(u8, @intCast(index % 6)));
+        fillRect(sx - 1, house_y - 4, 2, 4, 8);
+    }
+}
+
+fn drawPlayer() void {
+    const sx = @as(i32, @intFromFloat(player.x - camera[0]));
+    const sy = @as(i32, @intFromFloat(player.y - camera[1]));
+    const moving = player.moving > 0.5;
+
+    const frame = if (moving) @as(i32, @intFromFloat(@floor(player.step_clock * 2.0))) & 1 else 0;
+    const leg_offset: i32 = if (frame == 0) 1 else -1;
+
+    fillRect(sx - 8, sy + 8, 16, 3, 8);
+    fillRect(sx - 5, sy - 12, 10, 7, 23);
+    fillRect(sx - 4, sy - 19, 8, 7, 19);
+    fillRect(sx - 6, sy - 23, 12, 4, 26);
+    fillRect(sx - 6, sy - 5, 5, 11, 18);
+    fillRect(sx + 1, sy - 5 + leg_offset, 5, 11, 18);
+    fillRect(sx - 6, sy + 6, 5, 2, 8);
+    fillRect(sx + 1, sy + 6 + leg_offset, 5, 2, 8);
+
+    if (player.dir == 2.0) {
+        fillRect(sx - 4, sy - 16, 2, 2, 8);
+    } else if (player.dir == 3.0) {
+        fillRect(sx + 2, sy - 16, 2, 2, 8);
+    } else {
+        fillRect(sx - 2, sy - 16, 2, 2, 8);
+        fillRect(sx + 1, sy - 16, 2, 2, 8);
+    }
+}
+
+fn drawMiniMap() void {
+    const map_w: i32 = 66;
+    const map_h: i32 = 44;
+    const map_x: i32 = @as(i32, @intCast(Screen.width)) - map_w - 6;
+    const map_y: i32 = @as(i32, @intCast(Screen.height)) - map_h - 6;
+
+    fillRect(map_x, map_y, map_w, map_h, 8);
+    fillRect(map_x + 1, map_y + 1, map_w - 2, map_h - 2, 1);
+    drawFrameRect(map_x, map_y, map_w, map_h, 21);
+
+    var i: usize = 0;
+    while (i < HOUSE_COUNT) : (i += 1) {
+        const hx = map_x + 2 + @as(i32, @intFromFloat((houses[i].x / World.width) * @as(f32, @floatFromInt(map_w - 4))));
+        const hy = map_y + 2 + @as(i32, @intFromFloat((houses[i].y / World.height) * @as(f32, @floatFromInt(map_h - 4))));
+        fillRect(hx, hy, 2, 2, @as(u8, @intCast(17 + (i % 6))));
+    }
+
+    const px = map_x + 2 + @as(i32, @intFromFloat((player.x / World.width) * @as(f32, @floatFromInt(map_w - 4))));
+    const py = map_y + 2 + @as(i32, @intFromFloat((player.y / World.height) * @as(f32, @floatFromInt(map_h - 4))));
+    fillRect(px, py, 2, 2, 21);
+
+    const view_x = map_x + 2 + @as(i32, @intFromFloat((camera[0] / World.width) * @as(f32, @floatFromInt(map_w - 4))));
+    const view_y = map_y + 2 + @as(i32, @intFromFloat((camera[1] / World.height) * @as(f32, @floatFromInt(map_h - 4))));
+    const view_w = @max(4, @as(i32, @intFromFloat((@as(f32, @floatFromInt(Screen.width)) / World.width) * @as(f32, @floatFromInt(map_w - 4)))));
+    const view_h = @max(4, @as(i32, @intFromFloat((@as(f32, @floatFromInt(Screen.height)) / World.height) * @as(f32, @floatFromInt(map_h - 4)))));
+    drawFrameRect(view_x, view_y, view_w, view_h, 6);
+}
+
+fn renderFrame() void {
+    const cycle = @as(i32, @intFromFloat(@floor(render_clock * 6.0))) & 3;
+
+    var y: usize = 0;
+    while (y < Screen.height) : (y += 1) {
+        const stripe = (@as(i32, @intCast(y / 6)) + cycle) & 3;
+        const base_color: u8 = switch (stripe) {
+            0 => 1,
+            1 => 2,
+            2 => 3,
+            else => 4,
+        };
+
+        var x: usize = 0;
+        while (x < Screen.width) : (x += 1) {
+            const ripple_noise = (@as(i32, @intCast(x)) + @as(i32, @intCast(y)) * 3 + cycle * 11) & 63;
+            const color_index: u8 = if (ripple_noise < 2) 5 else base_color;
+            framebuffer[y * Screen.width + x] = palette[color_index];
+        }
+    }
+
+    const step_world_x = World.width / @as(f32, @floatFromInt(N));
+    const step_world_y = World.height / @as(f32, @floatFromInt(N));
+    var gy: usize = 1;
+    while (gy <= N) : (gy += 1) {
+        const world_y = @as(f32, @floatFromInt(gy)) * step_world_y;
+        const sy = @as(i32, @intFromFloat(world_y - camera[1]));
+        if (sy < -1 or sy >= @as(i32, @intCast(Screen.height))) continue;
+
+        var gx: usize = 1;
+        while (gx <= N) : (gx += 1) {
+            const fluid_energy = density[idx(gx, gy)];
+            if (fluid_energy <= 8.0) continue;
+
+            const world_x = @as(f32, @floatFromInt(gx)) * step_world_x;
+            const sx = @as(i32, @intFromFloat(world_x - camera[0]));
+            if (sx < -1 or sx >= @as(i32, @intCast(Screen.width))) continue;
+
+            const color: u8 = if (fluid_energy > 55.0) 7 else if (fluid_energy > 20.0) 6 else 5;
+            setPixel(sx, sy, color);
+            setPixel(sx + 1, sy, color);
+            setPixel(sx, sy + 1, color);
+        }
+    }
+
+    drawRouteDots();
+
+    var draw_list: [HOUSE_COUNT + 1]struct { is_player: bool, y: f32, index: usize } = undefined;
+    draw_list[0] = .{ .is_player = true, .y = player.y, .index = 0 };
+    var i: usize = 0;
+    while (i < HOUSE_COUNT) : (i += 1) {
+        draw_list[i + 1] = .{ .is_player = false, .y = houses[i].y, .index = i };
+    }
+
+    std.mem.sort(@TypeOf(draw_list[0]), &draw_list, {}, struct {
+        fn lessThan(_: void, a: @TypeOf(draw_list[0]), b: @TypeOf(draw_list[0])) bool {
+            return a.y < b.y;
+        }
+    }.lessThan);
+
+    for (draw_list) |item| {
+        if (item.is_player) {
+            drawPlayer();
+        } else {
+            drawHouse(item.index);
+        }
+    }
+
+    drawMiniMap();
+
+    fillRect(4, 4, 44, 12, 8);
+    drawFrameRect(4, 4, 44, 12, 21);
+    fillRect(5, 5, 42, 10, 23);
+
+    fillRect(@as(i32, @intCast(Screen.width)) - 46, 4, 42, 12, 8);
+    drawFrameRect(@as(i32, @intCast(Screen.width)) - 46, 4, 42, 12, 21);
+}
+
 export fn init() void {
     player = .{
         .x = 520.0,
@@ -184,10 +488,16 @@ export fn init() void {
     camera = .{ 400.0, 280.0 };
     active_house = -1;
     dismissed_house = -1;
+    input_axis_x = 0.0;
+    input_axis_y = 0.0;
+    input_buttons = 0;
+    render_clock = 0.0;
     resetFluid();
     resetEffects();
+    initPalette();
     syncHouseView();
     syncViews();
+    renderFrame();
 }
 
 export fn getHouseCount() usize {
@@ -242,13 +552,39 @@ export fn getTotalDensity() f32 {
     return total_density;
 }
 
+export fn getFramebufferPtr() [*]u16 {
+    return @ptrCast(&framebuffer);
+}
+
+export fn getPalettePtr() [*]u16 {
+    return @ptrCast(&palette);
+}
+
+export fn getFramebufferLen() usize {
+    return FRAMEBUFFER_SIZE;
+}
+
+export fn getActivePortal() i32 {
+    return active_house;
+}
+
 export fn getActiveHouse() i32 {
     return active_house;
 }
 
-export fn dismissActiveHouse() void {
+export fn dismissActivePortal() void {
     dismissed_house = active_house;
     active_house = -1;
+}
+
+export fn dismissActiveHouse() void {
+    dismissActivePortal();
+}
+
+export fn setInput(button_mask: u32, axis_x: f32, axis_y: f32) void {
+    input_buttons = button_mask;
+    input_axis_x = clamp(axis_x, -1.0, 1.0);
+    input_axis_y = clamp(axis_y, -1.0, 1.0);
 }
 
 export fn setPlayerPosition(x: f32, y: f32) void {
@@ -354,8 +690,8 @@ fn updatePlayer(dt: f32, input_x_raw: f32, input_y_raw: f32, reduced_motion: boo
 }
 
 fn updateCamera() void {
-    const target_x = clamp(player.x - Screen.width / 2.0, 0.0, World.width - Screen.width);
-    const target_y = clamp(player.y - Screen.height / 2.0, 0.0, World.height - Screen.height);
+    const target_x = clamp(player.x - @as(f32, @floatFromInt(Screen.width)) / 2.0, 0.0, World.width - @as(f32, @floatFromInt(Screen.width)));
+    const target_y = clamp(player.y - @as(f32, @floatFromInt(Screen.height)) / 2.0, 0.0, World.height - @as(f32, @floatFromInt(Screen.height)));
     camera[0] += (target_x - camera[0]) * 0.16;
     camera[1] += (target_y - camera[1]) * 0.16;
 }
@@ -408,17 +744,6 @@ fn updateProximity() void {
     if (nearest >= 0 and nearest_distance < TRIGGER_RADIUS and nearest != dismissed_house) {
         active_house = nearest;
     }
-}
-
-export fn gameUpdate(dt_raw: f32, input_x: f32, input_y: f32, reduced_motion_flag: u32) void {
-    const dt = clamp(dt_raw, 0.0, 0.05);
-    const reduced_motion = reduced_motion_flag != 0;
-    updatePlayer(dt, input_x, input_y, reduced_motion);
-    updateCamera();
-    updateEffects(dt);
-    stepFluid();
-    updateProximity();
-    syncViews();
 }
 
 fn setBoundary(b: i32, x: []f32) void {
@@ -540,6 +865,50 @@ fn stepFluid() void {
     }
 }
 
+fn stepGame(dt: f32, input_x: f32, input_y: f32, reduced_motion: bool) void {
+    updatePlayer(dt, input_x, input_y, reduced_motion);
+    updateCamera();
+    updateEffects(dt);
+    stepFluid();
+    updateProximity();
+    syncViews();
+}
+
+export fn gameUpdate(dt_raw: f32, input_x: f32, input_y: f32, reduced_motion_flag: u32) void {
+    const dt = clamp(dt_raw, 0.0, 0.05);
+    const reduced_motion = reduced_motion_flag != 0;
+    stepGame(dt, input_x, input_y, reduced_motion);
+    render_clock += dt;
+    renderFrame();
+}
+
+export fn updateAndRender(dt_ms: f32) void {
+    const dt = clamp(dt_ms / 1000.0, 0.0, 0.05);
+    stepGame(dt, input_axis_x, input_axis_y, reducedMotionEnabled());
+    render_clock += dt;
+    renderFrame();
+}
+
+test "framebuffer dimensions and pointer contract" {
+    try std.testing.expectEqual(@as(usize, Screen.width * Screen.height), FRAMEBUFFER_SIZE);
+    try std.testing.expectEqual(@as(usize, Screen.width * Screen.height), getFramebufferLen());
+    _ = getFramebufferPtr();
+    _ = getPalettePtr();
+}
+
+test "rgb555 packs channels in gba bit layout" {
+    try std.testing.expectEqual(@as(u16, 0x001f), rgb555(255, 0, 0));
+    try std.testing.expectEqual(@as(u16, 0x03e0), rgb555(0, 255, 0));
+    try std.testing.expectEqual(@as(u16, 0x7c00), rgb555(0, 0, 255));
+}
+
+test "set input clamps analog axes" {
+    setInput(BUTTON_ACCEPT, 5.0, -6.0);
+    try std.testing.expectEqual(@as(f32, 1.0), input_axis_x);
+    try std.testing.expectEqual(@as(f32, -1.0), input_axis_y);
+    try std.testing.expect((input_buttons & BUTTON_ACCEPT) != 0);
+}
+
 test "init clears game, effects, and fluid state" {
     init();
     addDensity(1, 1, 42.0);
@@ -551,7 +920,7 @@ test "init clears game, effects, and fluid state" {
     try std.testing.expectEqual(@as(f32, 0), total_density);
     try std.testing.expectEqual(@as(f32, 0), density[idx(1, 1)]);
     try std.testing.expectEqual(@as(f32, 520), player.x);
-    try std.testing.expect(active_house == -1);
+    try std.testing.expect(getActivePortal() == -1);
 }
 
 test "density writes stay inside the active grid" {
@@ -581,19 +950,19 @@ test "game update clamps movement inside world" {
     try std.testing.expect(player.y <= World.height - 26.0);
 }
 
-test "house proximity activates and dismissal suppresses until exit" {
+test "portal proximity activates and dismissal suppresses until exit" {
     init();
     setPlayerPosition(houses[0].x, houses[0].y);
-    gameUpdate(0.016, 0.0, 0.0, 1);
+    updateAndRender(16.0);
 
-    try std.testing.expectEqual(@as(i32, 0), active_house);
-    dismissActiveHouse();
-    gameUpdate(0.016, 0.0, 0.0, 1);
-    try std.testing.expectEqual(@as(i32, -1), active_house);
+    try std.testing.expectEqual(@as(i32, 0), getActivePortal());
+    dismissActivePortal();
+    updateAndRender(16.0);
+    try std.testing.expectEqual(@as(i32, -1), getActivePortal());
 
     setPlayerPosition(houses[0].x - TRIGGER_RADIUS - HYSTERESIS - 10.0, houses[0].y);
-    gameUpdate(0.016, 0.0, 0.0, 1);
+    updateAndRender(16.0);
     setPlayerPosition(houses[0].x, houses[0].y);
-    gameUpdate(0.016, 0.0, 0.0, 1);
-    try std.testing.expectEqual(@as(i32, 0), active_house);
+    updateAndRender(16.0);
+    try std.testing.expectEqual(@as(i32, 0), getActivePortal());
 }

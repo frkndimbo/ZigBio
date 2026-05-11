@@ -158,7 +158,7 @@ placement. CSS must not simulate game visuals or game HUD elements.
 
 ### Phase 1 - Lock The Contract
 
-- [ ] Update WASM exports around the final contract:
+- [x] Update WASM exports around the final contract:
   - `init()`
   - `setInput(button_mask: u32, axis_x: f32, axis_y: f32)`
   - `updateAndRender(dt_ms: f32)`
@@ -166,20 +166,20 @@ placement. CSS must not simulate game visuals or game HUD elements.
   - `getPalettePtr() [*]u16`
   - `getActivePortal() i32`
   - `dismissActivePortal()`
-- [ ] Keep `getWorldWidth()` and `getWorldHeight()` only if useful for tests or
+- [x] Keep `getWorldWidth()` and `getWorldHeight()` only if useful for tests or
   debug; JS should not need them for rendering.
-- [ ] Add tests for framebuffer size, RGB555 color packing, input clamping, and
+- [x] Add tests for framebuffer size, RGB555 color packing, input clamping, and
   active portal state.
 
 ### Phase 2 - Zig Framebuffer Renderer
 
-- [ ] Add RGB555 framebuffer storage in Zig: `[240 * 160]u16`.
-- [ ] Implement palette table with max 256 colors.
+- [x] Add RGB555 framebuffer storage in Zig: `[240 * 160]u16`.
+- [x] Implement palette table with max 256 colors.
 - [ ] Implement `clear`, `drawTile16`, `drawSprite`, and clipped blit routines.
-- [ ] Render water background in Zig using palette indices.
-- [ ] Render the player sprite in Zig.
-- [ ] Render floating houses and docks in Zig.
-- [ ] Render route markers and the minimap in Zig.
+- [x] Render water background in Zig using palette indices.
+- [x] Render the player sprite in Zig.
+- [x] Render floating houses and docks in Zig.
+- [x] Render route markers and the minimap in Zig.
 
 ### Phase 3 - Asset Conversion
 
@@ -192,10 +192,10 @@ placement. CSS must not simulate game visuals or game HUD elements.
 
 ### Phase 4 - Remove JS Renderer
 
-- [ ] Replace Canvas 2D world drawing in `game.js` with framebuffer blitting.
-- [ ] Delete JS house, player, water, route, minimap, and camera drawing logic.
-- [ ] Keep JS popup/navigation thin and state-driven from Zig.
-- [ ] Ensure no gameplay state lives in JS.
+- [x] Replace Canvas 2D world drawing in `game.js` with framebuffer blitting.
+- [x] Delete JS house, player, water, route, minimap, and camera drawing logic.
+- [x] Keep JS popup/navigation thin and state-driven from Zig.
+- [x] Ensure no gameplay state lives in JS.
 
 ### Phase 5 - Game Feel And Navigation
 
@@ -208,39 +208,39 @@ placement. CSS must not simulate game visuals or game HUD elements.
 
 ### Phase 6 - Deployment Readiness
 
-- [ ] `rtk env ZIG_GLOBAL_CACHE_DIR=/tmp/bio-zig-global-cache ZIG_LOCAL_CACHE_DIR=/tmp/bio-zig-local-cache zig build test --summary all`
-- [ ] `rtk env ZIG_GLOBAL_CACHE_DIR=/tmp/bio-zig-global-cache ZIG_LOCAL_CACHE_DIR=/tmp/bio-zig-local-cache zig build -Doptimize=ReleaseSmall --summary all`
-- [ ] Browser screenshot validation, desktop and mobile.
-- [ ] Frame-time benchmark for Zig update/render and JS blit.
+- [x] `rtk env ZIG_GLOBAL_CACHE_DIR=/tmp/bio-zig-global-cache ZIG_LOCAL_CACHE_DIR=/tmp/bio-zig-local-cache zig build test --summary all`
+- [x] `rtk env ZIG_GLOBAL_CACHE_DIR=/tmp/bio-zig-global-cache ZIG_LOCAL_CACHE_DIR=/tmp/bio-zig-local-cache zig build -Doptimize=ReleaseSmall --summary all`
+- [x] Browser screenshot validation, desktop and mobile.
+- [x] Frame-time benchmark for Zig update/render and JS blit.
 - [ ] Run `rtk graphify update .` after code edits. If graphify exits with the
   known `_os` NameError after writing output, note it instead of hiding it.
 - [ ] Commit and push the finished revision to GitHub when validation passes.
 
 ## Current Prototype Gaps To Fix
 
-- [ ] JS still renders most of the game world. This violates the final
+- [x] JS still renders most of the game world. This violates the final
   architecture and must be removed.
-- [ ] Zig currently owns movement/proximity/fluid data, but not the final pixel
+- [x] Zig currently owns movement/proximity/fluid data, but not the final pixel
   framebuffer.
-- [ ] Water uses density/alpha-style overlay logic rather than true palette
+- [x] Water uses density/alpha-style overlay logic rather than true palette
   cycling.
 - [ ] Asset usage is visual but not yet converted into GBA-style indexed data.
-- [ ] The minimap exists conceptually but must be rendered by Zig in the final
+- [x] The minimap exists conceptually but must be rendered by Zig in the final
   framebuffer.
-- [ ] The loading/page shell is acceptable, but game HUD must live inside the
+- [x] The loading/page shell is acceptable, but game HUD must live inside the
   framebuffer.
 
 ## Definition Of Done
 
-- [ ] Browser page boots a WASM game at 240 x 160 internal resolution.
-- [ ] Zig owns game update, rendering, camera, collision, water, minimap, and
+- [x] Browser page boots a WASM game at 240 x 160 internal resolution.
+- [x] Zig owns game update, rendering, camera, collision, water, minimap, and
   portal state.
-- [ ] JS is limited to WASM loading, input forwarding, framebuffer blitting, and
+- [x] JS is limited to WASM loading, input forwarding, framebuffer blitting, and
   external navigation.
 - [ ] Scene uses `../Asset` art for floating houses over water.
 - [ ] Visitors can navigate by looking at the in-game map.
-- [ ] ReleaseSmall build succeeds.
-- [ ] Unit tests pass.
-- [ ] Desktop and mobile visual checks pass.
+- [x] ReleaseSmall build succeeds.
+- [x] Unit tests pass.
+- [x] Desktop and mobile visual checks pass.
 - [ ] Graphify is updated after code edits.
 - [ ] Changes are committed and pushed.

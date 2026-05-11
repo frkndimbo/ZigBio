@@ -1,6 +1,6 @@
 # ZigBio
 
-ZigBio is a static GBA-style bio game. The game core runs in Zig compiled to WebAssembly: movement, camera, proximity triggers, ripple particles, and the water simulation live in `fluid.zig`. JavaScript is kept as the browser shell for input, Canvas 2D rendering, and navigation.
+ZigBio is a static GBA-style bio game. The game core runs in Zig compiled to WebAssembly and now owns movement, camera, proximity, minimap, water rendering, and the RGB555 framebuffer. JavaScript is limited to input forwarding, framebuffer blitting, and navigation UI.
 
 ## Current Decision
 
@@ -52,4 +52,4 @@ Then open `http://127.0.0.1:4173/`.
 
 ## Deployment
 
-Deploy the contents of `zig-out/` to a static host such as GitHub Pages, Cloudflare Pages, Netlify, or Vercel. Configure `.wasm` files with `Content-Type: application/wasm` when the host supports custom MIME types. The page also includes a non-streaming fallback for hosts that serve WASM as `application/octet-stream`.
+Deploy the contents of `zig-out/` to a static host such as GitHub Pages, Cloudflare Pages, Netlify, or Vercel. Configure `.wasm` files with `Content-Type: application/wasm` when the host supports custom MIME types. The loader includes a non-streaming fallback for hosts that serve WASM as `application/octet-stream`.
