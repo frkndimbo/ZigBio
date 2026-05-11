@@ -183,12 +183,12 @@ placement. CSS must not simulate game visuals or game HUD elements.
 
 ### Phase 3 - Asset Conversion
 
-- [ ] Audit `../Asset/Tilemap/tilemap_packed.png` and selected `../Asset/Tiles`.
-- [ ] Select tiles for water props, floating bases, docks, roofs, doors, signs,
+- [x] Audit `../Asset/Tilemap/tilemap_packed.png` and selected `../Asset/Tiles`.
+- [x] Select tiles for water props, floating bases, docks, roofs, doors, signs,
   and house bodies.
-- [ ] Convert selected tiles into palette-indexed data usable from Zig.
-- [ ] Keep generated data compact and deterministic.
-- [ ] Update `build.zig` so deployment installs only required runtime files.
+- [x] Convert selected tiles into palette-indexed data usable from Zig.
+- [x] Keep generated data compact and deterministic.
+- [x] Update `build.zig` so deployment installs only required runtime files.
 
 ### Phase 4 - Remove JS Renderer
 
@@ -224,7 +224,7 @@ placement. CSS must not simulate game visuals or game HUD elements.
   framebuffer.
 - [x] Water uses density/alpha-style overlay logic rather than true palette
   cycling.
-- [ ] Asset usage is visual but not yet converted into GBA-style indexed data.
+- [x] Asset usage is visual but not yet converted into GBA-style indexed data.
 - [x] The minimap exists conceptually but must be rendered by Zig in the final
   framebuffer.
 - [x] The loading/page shell is acceptable, but game HUD must live inside the

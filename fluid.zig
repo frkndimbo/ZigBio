@@ -1,4 +1,5 @@
 const std = @import("std");
+const asset = @import("asset_tiles.zig");
 
 const Screen = struct {
     const width: usize = 240;
@@ -10,7 +11,7 @@ const World = struct {
     const height: f32 = 620.0;
 };
 
-const N: usize = 64;
+const N: usize = 48;
 const SIZE: usize = (N + 2) * (N + 2);
 const ITER: usize = 4;
 const HOUSE_COUNT: usize = 5;
@@ -77,6 +78,46 @@ const houses = [_]House{
 };
 
 const routes = [_]usize{ 0, 1, 2, 4, 3, 0 };
+
+const HouseSprite = struct {
+    cols: usize,
+    rows: usize,
+    tiles: []const u8,
+    base_w: i32,
+};
+
+const house_sprites = [_]HouseSprite{
+    .{
+        .cols = 4,
+        .rows = 4,
+        .tiles = &[_]u8{ 52, 53, 54, 55, 64, 65, 66, 67, 72, 73, 74, 75, 84, 85, 86, 87 },
+        .base_w = 44,
+    },
+    .{
+        .cols = 4,
+        .rows = 4,
+        .tiles = &[_]u8{ 48, 49, 50, 51, 60, 61, 62, 63, 76, 77, 78, 79, 88, 89, 90, 91 },
+        .base_w = 44,
+    },
+    .{
+        .cols = 3,
+        .rows = 4,
+        .tiles = &[_]u8{ 52, 53, 54, 64, 67, 68, 72, 74, 75, 84, 85, 87 },
+        .base_w = 38,
+    },
+    .{
+        .cols = 3,
+        .rows = 4,
+        .tiles = &[_]u8{ 48, 49, 50, 60, 63, 62, 76, 77, 79, 88, 89, 91 },
+        .base_w = 38,
+    },
+    .{
+        .cols = 5,
+        .rows = 3,
+        .tiles = &[_]u8{ 96, 97, 98, 99, 100, 108, 109, 110, 111, 112, 120, 121, 122, 123, 124 },
+        .base_w = 56,
+    },
+};
 
 var player: Player = undefined;
 var camera: [2]f32 = .{ 0.0, 0.0 };
@@ -160,6 +201,36 @@ fn initPalette() void {
     palette[24] = rgb555(177, 86, 65);
     palette[25] = rgb555(211, 115, 82);
     palette[26] = rgb555(62, 54, 61);
+
+    for (asset.palette, 0..) |color, i| {
+        const slot = @as(usize, asset.palette_base) + i;
+        if (slot < PALETTE_SIZE) {
+            palette[slot] = color;
+        }
+    }
+}
+
+fn findAssetTile(sheet_id: u8) ?usize {
+    for (asset.tile_ids, 0..) |tile_id, i| {
+        if (tile_id == sheet_id) return i;
+    }
+    return null;
+}
+
+fn drawAssetTile8(sheet_id: u8, x: i32, y: i32) void {
+    const tile_idx = findAssetTile(sheet_id) orelse return;
+    const tile = asset.tiles[tile_idx];
+
+    var sy: usize = 0;
+    while (sy < 8) : (sy += 1) {
+        var sx: usize = 0;
+        while (sx < 8) : (sx += 1) {
+            const source_index = (sy * 2) * 16 + (sx * 2);
+            const color = tile[source_index];
+            if (color == asset.transparent) continue;
+            setPixel(x + @as(i32, @intCast(sx)), y + @as(i32, @intCast(sy)), color);
+        }
+    }
 }
 
 fn syncHouseView() void {
@@ -298,7 +369,9 @@ fn drawHouse(index: usize) void {
     const bob_phase = render_clock * 2.0 + @as(f32, @floatFromInt(index));
     const bob = @as(i32, @intFromFloat(@sin(bob_phase) * 2.0));
 
-    const dock_width: i32 = if (index == 4) 62 else 54;
+    const sprite = house_sprites[index % house_sprites.len];
+
+    const dock_width: i32 = sprite.base_w;
     const dock_x = sx - @divTrunc(dock_width, 2);
     const dock_y = sy + 10 + bob;
 
@@ -310,34 +383,24 @@ fn drawHouse(index: usize) void {
         fillRect(plank_x, dock_y + 1, 7, 11, 13);
     }
 
-    const house_w: i32 = if (index == 4) 44 else 38;
-    const house_h: i32 = if (index == 4) 24 else 28;
+    const house_w: i32 = @as(i32, @intCast(sprite.cols)) * 8;
+    const house_h: i32 = @as(i32, @intCast(sprite.rows)) * 8;
     const house_x = sx - @divTrunc(house_w, 2);
-    const house_y = dock_y - house_h;
+    const house_y = dock_y - house_h - 2;
 
-    const body_color: u8 = if (index % 2 == 0) 24 else 14;
-    const roof_color: u8 = if (index % 2 == 0) 25 else 15;
-
-    fillRect(house_x, house_y, house_w, house_h, body_color);
-    drawFrameRect(house_x, house_y, house_w, house_h, 8);
-
-    var roof_row: i32 = 0;
-    while (roof_row < 9) : (roof_row += 1) {
-        const shrink = roof_row * 2;
-        fillRect(house_x + shrink, house_y - 9 + roof_row, house_w - shrink * 2, 1, roof_color);
+    var row: usize = 0;
+    while (row < sprite.rows) : (row += 1) {
+        var col: usize = 0;
+        while (col < sprite.cols) : (col += 1) {
+            const tile_id = sprite.tiles[row * sprite.cols + col];
+            drawAssetTile8(tile_id, house_x + @as(i32, @intCast(col * 8)), house_y + @as(i32, @intCast(row * 8)));
+        }
     }
 
-    const door_w: i32 = 7;
-    fillRect(sx - @divTrunc(door_w, 2), house_y + house_h - 11, door_w, 10, 8);
-    fillRect(sx - @divTrunc(door_w, 2) + 1, house_y + house_h - 10, door_w - 2, 9, 26);
-
-    fillRect(house_x + 4, house_y + 8, 6, 5, 15);
-    fillRect(house_x + house_w - 10, house_y + 8, 6, 5, 15);
-
     if (active_house == @as(i32, @intCast(index))) {
-        fillRect(sx - 9, house_y - 14, 18, 10, 8);
-        fillRect(sx - 8, house_y - 13, 16, 8, 17 + @as(u8, @intCast(index % 6)));
-        fillRect(sx - 1, house_y - 4, 2, 4, 8);
+        fillRect(sx - 9, house_y - 12, 18, 10, 8);
+        fillRect(sx - 8, house_y - 11, 16, 8, 17 + @as(u8, @intCast(index % 6)));
+        fillRect(sx - 1, house_y - 2, 2, 3, 8);
     }
 }
 
@@ -938,7 +1001,8 @@ test "projection divergence uses grid-normalized scale" {
     init();
     vx[idx(2, 1)] = 64.0;
 
-    try std.testing.expectApproxEqAbs(@as(f32, -0.5), divergenceAt(vx[0..], vy[0..], 1, 1), 0.0001);
+    const expected = -32.0 / @as(f32, @floatFromInt(N));
+    try std.testing.expectApproxEqAbs(expected, divergenceAt(vx[0..], vy[0..], 1, 1), 0.0001);
 }
 
 test "game update clamps movement inside world" {

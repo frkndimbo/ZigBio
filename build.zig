@@ -29,7 +29,6 @@ pub fn build(b: *std.Build) void {
     b.installFile("style.css", "style.css");
     b.installFile("game.js", "game.js");
     b.installFile("preloader.js", "preloader.js");
-    b.installFile("Asset/Tilemap/tilemap_packed.png", "Asset/Tilemap/tilemap_packed.png");
 
     const test_module = b.createModule(.{
         .root_source_file = b.path("fluid.zig"),

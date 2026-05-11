@@ -34,6 +34,13 @@ zig-out/
 └── bin/fluid.wasm
 ```
 
+Asset tiles for houses are converted to palette-indexed Zig data in
+`asset_tiles.zig`. Regenerate them from `../Asset/Tiles` with:
+
+```sh
+rtk python3 tools/generate_asset_tiles.py
+```
+
 ## Test
 
 ```sh
