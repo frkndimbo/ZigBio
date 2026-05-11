@@ -59,4 +59,38 @@ Then open `http://127.0.0.1:4173/`.
 
 ## Deployment
 
-Deploy the contents of `zig-out/` to a static host such as GitHub Pages, Cloudflare Pages, Netlify, or Vercel. Configure `.wasm` files with `Content-Type: application/wasm` when the host supports custom MIME types. The loader includes a non-streaming fallback for hosts that serve WASM as `application/octet-stream`.
+### Cloudflare Pages (Direct Upload)
+
+1. Build release artifacts:
+
+   ```sh
+   rtk env ZIG_GLOBAL_CACHE_DIR=/tmp/bio-zig-global-cache ZIG_LOCAL_CACHE_DIR=/tmp/bio-zig-local-cache zig build -Doptimize=ReleaseSmall
+   ```
+
+2. Authenticate Wrangler once:
+
+   ```sh
+   rtk bunx wrangler login
+   ```
+
+3. Create a Pages project once:
+
+   ```sh
+   rtk bunx wrangler pages project create zigbio --production-branch main
+   ```
+
+4. Deploy the generated static output:
+
+   ```sh
+   rtk bunx wrangler pages deploy zig-out --project-name zigbio --branch main
+   ```
+
+`wrangler.toml` is included with `pages_build_output_dir = "zig-out"` for this
+project. If your project name differs, update `name` in `wrangler.toml` and the
+deploy command accordingly.
+
+### Other Static Hosts
+
+You can also deploy `zig-out/` to GitHub Pages, Netlify, or Vercel. The loader
+already includes a fallback for hosts that return WASM as
+`application/octet-stream`.

@@ -212,6 +212,9 @@ placement. CSS must not simulate game visuals or game HUD elements.
 - [x] `rtk env ZIG_GLOBAL_CACHE_DIR=/tmp/bio-zig-global-cache ZIG_LOCAL_CACHE_DIR=/tmp/bio-zig-local-cache zig build -Doptimize=ReleaseSmall --summary all`
 - [x] Browser screenshot validation, desktop and mobile.
 - [x] Frame-time benchmark for Zig update/render and JS blit.
+- [x] Add `wrangler.toml` for Cloudflare Pages with `pages_build_output_dir = "zig-out"`.
+- [x] Document Cloudflare Pages deployment flow in `README.md`.
+- [x] Execute first live deploy with authenticated Cloudflare account.
 - [ ] Run `rtk graphify update .` after code edits. If graphify exits with the
   known `_os` NameError after writing output, note it instead of hiding it.
 - [ ] Commit and push the finished revision to GitHub when validation passes.
