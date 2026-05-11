@@ -144,7 +144,7 @@
 
         if (nextIndex < 0) {
             popup.hidden = true;
-            areaLabel.textContent = 'FLOAT MAP';
+            areaLabel.textContent = 'MEDA MAP';
             return;
         }
 
@@ -187,12 +187,12 @@
         window.ZigBioPreloader.prefetchAndNavigate(platforms[index].url);
     }
 
-    function hidePopup() {
-        dismissPortal();
-        state.popupIndex = -1;
-        popup.hidden = true;
-        areaLabel.textContent = 'FLOAT MAP';
-    }
+function hidePopup() {
+    dismissPortal();
+    state.popupIndex = -1;
+    popup.hidden = true;
+    areaLabel.textContent = 'MEDA MAP';
+}
 
     function setupKeyboard() {
         window.addEventListener('keydown', (event) => {

@@ -7,8 +7,11 @@ const Screen = struct {
 };
 
 const World = struct {
-    const width: f32 = 900.0;
-    const height: f32 = 620.0;
+    const tile_size: i32 = 16;
+    const map_w: usize = 64;
+    const map_h: usize = 44;
+    const width: f32 = @as(f32, @floatFromInt(map_w * @as(usize, tile_size)));
+    const height: f32 = @as(f32, @floatFromInt(map_h * @as(usize, tile_size)));
 };
 
 const N: usize = 48;
@@ -19,6 +22,7 @@ const RIPPLE_COUNT: usize = 72;
 const PARTICLE_COUNT: usize = 72;
 const FRAMEBUFFER_SIZE: usize = Screen.width * Screen.height;
 const PALETTE_SIZE: usize = 256;
+const MAP_TILE_COUNT: usize = World.map_w * World.map_h;
 
 const BUTTON_ACCEPT: u32 = 1 << 0;
 const BUTTON_CANCEL: u32 = 1 << 1;
@@ -70,14 +74,17 @@ const Particle = struct {
 };
 
 const houses = [_]House{
-    .{ .x = 442.0, .y = 330.0, .radius = TRIGGER_RADIUS },
-    .{ .x = 590.0, .y = 300.0, .radius = TRIGGER_RADIUS },
-    .{ .x = 720.0, .y = 395.0, .radius = TRIGGER_RADIUS },
-    .{ .x = 380.0, .y = 472.0, .radius = TRIGGER_RADIUS },
-    .{ .x = 650.0, .y = 535.0, .radius = TRIGGER_RADIUS },
+    .{ .x = 224.0, .y = 200.0, .radius = TRIGGER_RADIUS },
+    .{ .x = 416.0, .y = 200.0, .radius = TRIGGER_RADIUS },
+    .{ .x = 608.0, .y = 200.0, .radius = TRIGGER_RADIUS },
+    .{ .x = 320.0, .y = 408.0, .radius = TRIGGER_RADIUS },
+    .{ .x = 544.0, .y = 408.0, .radius = TRIGGER_RADIUS },
 };
 
 const routes = [_]usize{ 0, 1, 2, 4, 3, 0 };
+
+const portal_brand_bg = [_]u8{ 200, 202, 204, 206, 209 };
+const portal_brand_fg = [_]u8{ 201, 201, 205, 208, 201 };
 
 const HouseSprite = struct {
     cols: usize,
@@ -142,6 +149,7 @@ var particle_view: [PARTICLE_COUNT * 5]f32 = undefined;
 
 var palette: [PALETTE_SIZE]u16 = [_]u16{0} ** PALETTE_SIZE;
 var framebuffer: [FRAMEBUFFER_SIZE]u16 = [_]u16{0} ** FRAMEBUFFER_SIZE;
+var world_tiles: [MAP_TILE_COUNT]u8 = [_]u8{0} ** MAP_TILE_COUNT;
 
 var input_axis_x: f32 = 0.0;
 var input_axis_y: f32 = 0.0;
@@ -202,6 +210,18 @@ fn initPalette() void {
     palette[25] = rgb555(211, 115, 82);
     palette[26] = rgb555(62, 54, 61);
 
+    // Brand hues for portal pinpoints.
+    palette[200] = rgb555(10, 102, 194); // LinkedIn
+    palette[201] = rgb555(247, 250, 252); // bright white
+    palette[202] = rgb555(24, 23, 23); // GitHub
+    palette[203] = rgb555(255, 0, 80); // TikTok pink
+    palette[204] = rgb555(228, 64, 95); // Instagram pink
+    palette[205] = rgb555(252, 175, 69); // Instagram warm accent
+    palette[206] = rgb555(0, 242, 234); // TikTok cyan
+    palette[207] = rgb555(67, 97, 238); // Portfolio blue
+    palette[208] = rgb555(246, 190, 96); // Portfolio amber
+    palette[209] = rgb555(58, 12, 163); // Instagram deep violet
+
     for (asset.palette, 0..) |color, i| {
         const slot = @as(usize, asset.palette_base) + i;
         if (slot < PALETTE_SIZE) {
@@ -217,19 +237,224 @@ fn findAssetTile(sheet_id: u8) ?usize {
     return null;
 }
 
-fn drawAssetTile8(sheet_id: u8, x: i32, y: i32) void {
+fn drawAssetTile16(sheet_id: u8, x: i32, y: i32) void {
     const tile_idx = findAssetTile(sheet_id) orelse return;
     const tile = asset.tiles[tile_idx];
 
     var sy: usize = 0;
-    while (sy < 8) : (sy += 1) {
+    while (sy < 16) : (sy += 1) {
         var sx: usize = 0;
-        while (sx < 8) : (sx += 1) {
-            const source_index = (sy * 2) * 16 + (sx * 2);
-            const color = tile[source_index];
+        while (sx < 16) : (sx += 1) {
+            const color = tile[sy * 16 + sx];
             if (color == asset.transparent) continue;
             setPixel(x + @as(i32, @intCast(sx)), y + @as(i32, @intCast(sy)), color);
         }
+    }
+}
+
+fn mapOffset(tx: i32, ty: i32) ?usize {
+    const map_w_i: i32 = @intCast(World.map_w);
+    const map_h_i: i32 = @intCast(World.map_h);
+    if (tx < 0 or ty < 0) return null;
+    if (tx >= map_w_i or ty >= map_h_i) return null;
+    return @as(usize, @intCast(tx)) + @as(usize, @intCast(ty)) * World.map_w;
+}
+
+fn setMapTile(tx: i32, ty: i32, tile_id: u8) void {
+    const offset = mapOffset(tx, ty) orelse return;
+    world_tiles[offset] = tile_id;
+}
+
+fn fillMapRect(tx: i32, ty: i32, tw: i32, th: i32, tile_id: u8) void {
+    var y = ty;
+    while (y < ty + th) : (y += 1) {
+        var x = tx;
+        while (x < tx + tw) : (x += 1) {
+            setMapTile(x, y, tile_id);
+        }
+    }
+}
+
+fn drawMapTile(tx: i32, ty: i32) void {
+    const offset = mapOffset(tx, ty) orelse return;
+    const tile_id = world_tiles[offset];
+    const sx = tx * World.tile_size - @as(i32, @intFromFloat(camera[0]));
+    const sy = ty * World.tile_size - @as(i32, @intFromFloat(camera[1]));
+    drawAssetTile16(tile_id, sx, sy);
+}
+
+fn initTownMap() void {
+    for (0..World.map_h) |ty| {
+        for (0..World.map_w) |tx| {
+            const jitter = (tx * 7 + ty * 11) % 9;
+            const tile_id: u8 = if (jitter == 0) 2 else if (jitter < 3) 1 else 0;
+            setMapTile(@as(i32, @intCast(tx)), @as(i32, @intCast(ty)), tile_id);
+        }
+    }
+
+    // Main streets.
+    fillMapRect(7, 11, 50, 3, 13);
+    fillMapRect(11, 23, 44, 3, 13);
+    fillMapRect(13, 7, 3, 27, 13);
+    fillMapRect(25, 7, 3, 27, 13);
+    fillMapRect(37, 7, 3, 27, 13);
+
+    // Side blocks for neighborhoods.
+    fillMapRect(6, 16, 10, 5, 12);
+    fillMapRect(22, 16, 10, 5, 12);
+    fillMapRect(38, 16, 10, 5, 12);
+    fillMapRect(12, 28, 10, 5, 12);
+    fillMapRect(30, 28, 10, 5, 12);
+
+    // Fences and props around plots.
+    var x: i32 = 5;
+    while (x < 58) : (x += 4) {
+        setMapTile(x, 10, 69);
+        setMapTile(x, 26, 69);
+    }
+    setMapTile(5, 10, 68);
+    setMapTile(57, 10, 70);
+    setMapTile(5, 26, 68);
+    setMapTile(57, 26, 70);
+
+    // Tree rows for Medabots-like suburban blocks.
+    for (0..7) |i| {
+        setMapTile(3 + @as(i32, @intCast(i * 2)), 5, if (i % 2 == 0) 4 else 3);
+        setMapTile(47 + @as(i32, @intCast(i * 2)), 5, if (i % 2 == 0) 10 else 11);
+    }
+    for (0..10) |i| {
+        setMapTile(2 + @as(i32, @intCast(i * 2)), 36, if (i % 3 == 0) 5 else 9);
+    }
+
+    // Utility objects and signs around the streets.
+    setMapTile(20, 14, 82);
+    setMapTile(35, 14, 82);
+    setMapTile(23, 24, 94);
+    setMapTile(41, 24, 94);
+    setMapTile(17, 30, 83);
+    setMapTile(43, 30, 83);
+}
+
+fn drawTownMap() void {
+    const tile_size = World.tile_size;
+    const map_w_i: i32 = @intCast(World.map_w);
+    const map_h_i: i32 = @intCast(World.map_h);
+    const visible_tiles_x: i32 = @as(i32, @intCast(Screen.width / 16));
+    const visible_tiles_y: i32 = @as(i32, @intCast(Screen.height / 16));
+
+    const start_tx = clampI(@divFloor(@as(i32, @intFromFloat(camera[0])), tile_size) - 1, 0, map_w_i - 1);
+    const start_ty = clampI(@divFloor(@as(i32, @intFromFloat(camera[1])), tile_size) - 1, 0, map_h_i - 1);
+    const end_tx = clampI(start_tx + visible_tiles_x + 3, 0, map_w_i - 1);
+    const end_ty = clampI(start_ty + visible_tiles_y + 3, 0, map_h_i - 1);
+
+    var ty = start_ty;
+    while (ty <= end_ty) : (ty += 1) {
+        var tx = start_tx;
+        while (tx <= end_tx) : (tx += 1) {
+            drawMapTile(tx, ty);
+        }
+    }
+}
+
+fn drawRouteDots() void {
+    var route_i: usize = 1;
+    while (route_i < routes.len) : (route_i += 1) {
+        const from = houses[routes[route_i - 1]];
+        const to = houses[routes[route_i]];
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const distance_len = @sqrt(dx * dx + dy * dy);
+        const steps = @max(@as(usize, 1), @as(usize, @intFromFloat(distance_len / 32.0)));
+
+        var step: usize = 1;
+        while (step <= steps) : (step += 1) {
+            const t = @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(steps + 1));
+            const world_x = from.x + dx * t;
+            const world_y = from.y + dy * t;
+            const sx = @as(i32, @intFromFloat(world_x - camera[0]));
+            const sy = @as(i32, @intFromFloat(world_y - camera[1]));
+            fillRect(sx - 1, sy - 1, 3, 3, 21);
+            fillRect(sx, sy, 1, 1, 8);
+        }
+    }
+}
+
+fn drawPortalBadge(index: usize, anchor_x: i32, anchor_y: i32) void {
+    const bg = portal_brand_bg[index % portal_brand_bg.len];
+    const fg = portal_brand_fg[index % portal_brand_fg.len];
+
+    fillRect(anchor_x - 7, anchor_y - 9, 14, 10, 8);
+    fillRect(anchor_x - 6, anchor_y - 8, 12, 8, bg);
+
+    switch (index) {
+        // LinkedIn style `in`
+        0 => {
+            fillRect(anchor_x - 4, anchor_y - 6, 2, 6, fg);
+            fillRect(anchor_x - 4, anchor_y - 8, 2, 1, fg);
+            fillRect(anchor_x - 1, anchor_y - 4, 2, 4, fg);
+            fillRect(anchor_x + 1, anchor_y - 6, 2, 6, fg);
+            fillRect(anchor_x + 1, anchor_y - 5, 2, 1, fg);
+        },
+        // GitHub-like cat face silhouette
+        1 => {
+            fillRect(anchor_x - 3, anchor_y - 6, 8, 6, fg);
+            fillRect(anchor_x - 4, anchor_y - 5, 1, 4, fg);
+            fillRect(anchor_x + 4, anchor_y - 5, 1, 4, fg);
+            fillRect(anchor_x - 2, anchor_y - 7, 2, 1, fg);
+            fillRect(anchor_x + 1, anchor_y - 7, 2, 1, fg);
+            fillRect(anchor_x - 1, anchor_y - 3, 1, 1, bg);
+            fillRect(anchor_x + 1, anchor_y - 3, 1, 1, bg);
+        },
+        // TikTok note silhouette
+        2 => {
+            fillRect(anchor_x + 1, anchor_y - 7, 2, 6, fg);
+            fillRect(anchor_x - 2, anchor_y - 4, 5, 2, fg);
+            fillRect(anchor_x - 3, anchor_y - 2, 4, 2, fg);
+        },
+        // Instagram camera glyph
+        3 => {
+            fillRect(anchor_x - 4, anchor_y - 7, 8, 1, fg);
+            fillRect(anchor_x - 4, anchor_y - 1, 8, 1, fg);
+            fillRect(anchor_x - 4, anchor_y - 6, 1, 5, fg);
+            fillRect(anchor_x + 3, anchor_y - 6, 1, 5, fg);
+            fillRect(anchor_x - 1, anchor_y - 5, 2, 2, 205);
+            fillRect(anchor_x + 1, anchor_y - 6, 1, 1, fg);
+        },
+        // Portfolio briefcase icon
+        else => {
+            fillRect(anchor_x - 4, anchor_y - 5, 8, 5, fg);
+            fillRect(anchor_x - 2, anchor_y - 7, 4, 2, fg);
+            fillRect(anchor_x - 1, anchor_y - 4, 2, 1, 208);
+        },
+    }
+}
+
+fn drawHouse(index: usize) void {
+    const house = houses[index];
+    const sx = @as(i32, @intFromFloat(house.x - camera[0]));
+    const sy = @as(i32, @intFromFloat(house.y - camera[1]));
+    const sprite = house_sprites[index % house_sprites.len];
+
+    const house_w: i32 = @as(i32, @intCast(sprite.cols)) * 16;
+    const house_h: i32 = @as(i32, @intCast(sprite.rows)) * 16;
+    const house_x = sx - @divTrunc(house_w, 2);
+    const house_y = sy - house_h + 10;
+
+    fillRect(house_x + 4, sy + 2, house_w - 8, 6, 8);
+
+    var row: usize = 0;
+    while (row < sprite.rows) : (row += 1) {
+        var col: usize = 0;
+        while (col < sprite.cols) : (col += 1) {
+            const tile_id = sprite.tiles[row * sprite.cols + col];
+            drawAssetTile16(tile_id, house_x + @as(i32, @intCast(col * 16)), house_y + @as(i32, @intCast(row * 16)));
+        }
+    }
+
+    drawPortalBadge(index, sx, house_y - 4);
+
+    if (active_house == @as(i32, @intCast(index))) {
+        drawFrameRect(house_x - 2, house_y - 2, house_w + 4, house_h + 6, 21);
     }
 }
 
@@ -339,71 +564,6 @@ fn drawFrameRect(x: i32, y: i32, w: i32, h: i32, palette_index: u8) void {
     fillRect(x + w - 1, y, 1, h, palette_index);
 }
 
-fn drawRouteDots() void {
-    var route_i: usize = 1;
-    while (route_i < routes.len) : (route_i += 1) {
-        const from = houses[routes[route_i - 1]];
-        const to = houses[routes[route_i]];
-        const dx = to.x - from.x;
-        const dy = to.y - from.y;
-        const distance_len = @sqrt(dx * dx + dy * dy);
-        const steps = @max(@as(usize, 1), @as(usize, @intFromFloat(distance_len / 40.0)));
-
-        var step: usize = 1;
-        while (step <= steps) : (step += 1) {
-            const t = @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(steps + 1));
-            const world_x = from.x + dx * t;
-            const world_y = from.y + dy * t;
-            const sx = @as(i32, @intFromFloat(world_x - camera[0]));
-            const sy = @as(i32, @intFromFloat(world_y - camera[1]));
-            fillRect(sx, sy, 2, 2, 5);
-        }
-    }
-}
-
-fn drawHouse(index: usize) void {
-    const house = houses[index];
-    const sx = @as(i32, @intFromFloat(house.x - camera[0]));
-    const sy = @as(i32, @intFromFloat(house.y - camera[1]));
-
-    const bob_phase = render_clock * 2.0 + @as(f32, @floatFromInt(index));
-    const bob = @as(i32, @intFromFloat(@sin(bob_phase) * 2.0));
-
-    const sprite = house_sprites[index % house_sprites.len];
-
-    const dock_width: i32 = sprite.base_w;
-    const dock_x = sx - @divTrunc(dock_width, 2);
-    const dock_y = sy + 10 + bob;
-
-    fillRect(dock_x - 2, dock_y + 15, dock_width + 4, 3, 8);
-    fillRect(dock_x, dock_y, dock_width, 14, 11);
-
-    var plank_x = dock_x + 3;
-    while (plank_x < dock_x + dock_width - 4) : (plank_x += 12) {
-        fillRect(plank_x, dock_y + 1, 7, 11, 13);
-    }
-
-    const house_w: i32 = @as(i32, @intCast(sprite.cols)) * 8;
-    const house_h: i32 = @as(i32, @intCast(sprite.rows)) * 8;
-    const house_x = sx - @divTrunc(house_w, 2);
-    const house_y = dock_y - house_h - 2;
-
-    var row: usize = 0;
-    while (row < sprite.rows) : (row += 1) {
-        var col: usize = 0;
-        while (col < sprite.cols) : (col += 1) {
-            const tile_id = sprite.tiles[row * sprite.cols + col];
-            drawAssetTile8(tile_id, house_x + @as(i32, @intCast(col * 8)), house_y + @as(i32, @intCast(row * 8)));
-        }
-    }
-
-    if (active_house == @as(i32, @intCast(index))) {
-        fillRect(sx - 9, house_y - 12, 18, 10, 8);
-        fillRect(sx - 8, house_y - 11, 16, 8, 17 + @as(u8, @intCast(index % 6)));
-        fillRect(sx - 1, house_y - 2, 2, 3, 8);
-    }
-}
-
 fn drawPlayer() void {
     const sx = @as(i32, @intFromFloat(player.x - camera[0]));
     const sy = @as(i32, @intFromFloat(player.y - camera[1]));
@@ -412,22 +572,21 @@ fn drawPlayer() void {
     const frame = if (moving) @as(i32, @intFromFloat(@floor(player.step_clock * 2.0))) & 1 else 0;
     const leg_offset: i32 = if (frame == 0) 1 else -1;
 
-    fillRect(sx - 8, sy + 8, 16, 3, 8);
-    fillRect(sx - 5, sy - 12, 10, 7, 23);
-    fillRect(sx - 4, sy - 19, 8, 7, 19);
-    fillRect(sx - 6, sy - 23, 12, 4, 26);
-    fillRect(sx - 6, sy - 5, 5, 11, 18);
-    fillRect(sx + 1, sy - 5 + leg_offset, 5, 11, 18);
-    fillRect(sx - 6, sy + 6, 5, 2, 8);
-    fillRect(sx + 1, sy + 6 + leg_offset, 5, 2, 8);
+    fillRect(sx - 7, sy + 2, 14, 3, 8);
+    fillRect(sx - 4, sy - 16, 8, 6, 19);
+    fillRect(sx - 6, sy - 10, 12, 8, 24);
+    fillRect(sx - 5, sy - 2, 4, 6, 18);
+    fillRect(sx + 1, sy - 2 + leg_offset, 4, 6, 18);
+    fillRect(sx - 5, sy + 4, 4, 1, 8);
+    fillRect(sx + 1, sy + 4 + leg_offset, 4, 1, 8);
 
     if (player.dir == 2.0) {
-        fillRect(sx - 4, sy - 16, 2, 2, 8);
+        fillRect(sx - 3, sy - 14, 2, 2, 8);
     } else if (player.dir == 3.0) {
-        fillRect(sx + 2, sy - 16, 2, 2, 8);
+        fillRect(sx + 1, sy - 14, 2, 2, 8);
     } else {
-        fillRect(sx - 2, sy - 16, 2, 2, 8);
-        fillRect(sx + 1, sy - 16, 2, 2, 8);
+        fillRect(sx - 2, sy - 14, 2, 2, 8);
+        fillRect(sx + 1, sy - 14, 2, 2, 8);
     }
 }
 
@@ -438,18 +597,20 @@ fn drawMiniMap() void {
     const map_y: i32 = @as(i32, @intCast(Screen.height)) - map_h - 6;
 
     fillRect(map_x, map_y, map_w, map_h, 8);
-    fillRect(map_x + 1, map_y + 1, map_w - 2, map_h - 2, 1);
+    fillRect(map_x + 1, map_y + 1, map_w - 2, map_h - 2, 0);
     drawFrameRect(map_x, map_y, map_w, map_h, 21);
 
     var i: usize = 0;
     while (i < HOUSE_COUNT) : (i += 1) {
         const hx = map_x + 2 + @as(i32, @intFromFloat((houses[i].x / World.width) * @as(f32, @floatFromInt(map_w - 4))));
         const hy = map_y + 2 + @as(i32, @intFromFloat((houses[i].y / World.height) * @as(f32, @floatFromInt(map_h - 4))));
-        fillRect(hx, hy, 2, 2, @as(u8, @intCast(17 + (i % 6))));
+        fillRect(hx - 1, hy - 1, 4, 4, portal_brand_bg[i % portal_brand_bg.len]);
+        fillRect(hx, hy, 2, 2, portal_brand_fg[i % portal_brand_fg.len]);
     }
 
     const px = map_x + 2 + @as(i32, @intFromFloat((player.x / World.width) * @as(f32, @floatFromInt(map_w - 4))));
     const py = map_y + 2 + @as(i32, @intFromFloat((player.y / World.height) * @as(f32, @floatFromInt(map_h - 4))));
+    fillRect(px - 1, py - 1, 4, 4, 8);
     fillRect(px, py, 2, 2, 21);
 
     const view_x = map_x + 2 + @as(i32, @intFromFloat((camera[0] / World.width) * @as(f32, @floatFromInt(map_w - 4))));
@@ -460,49 +621,9 @@ fn drawMiniMap() void {
 }
 
 fn renderFrame() void {
-    const cycle = @as(i32, @intFromFloat(@floor(render_clock * 6.0))) & 3;
+    fillRect(0, 0, Screen.width, Screen.height, 0);
 
-    var y: usize = 0;
-    while (y < Screen.height) : (y += 1) {
-        const stripe = (@as(i32, @intCast(y / 6)) + cycle) & 3;
-        const base_color: u8 = switch (stripe) {
-            0 => 1,
-            1 => 2,
-            2 => 3,
-            else => 4,
-        };
-
-        var x: usize = 0;
-        while (x < Screen.width) : (x += 1) {
-            const ripple_noise = (@as(i32, @intCast(x)) + @as(i32, @intCast(y)) * 3 + cycle * 11) & 63;
-            const color_index: u8 = if (ripple_noise < 2) 5 else base_color;
-            framebuffer[y * Screen.width + x] = palette[color_index];
-        }
-    }
-
-    const step_world_x = World.width / @as(f32, @floatFromInt(N));
-    const step_world_y = World.height / @as(f32, @floatFromInt(N));
-    var gy: usize = 1;
-    while (gy <= N) : (gy += 1) {
-        const world_y = @as(f32, @floatFromInt(gy)) * step_world_y;
-        const sy = @as(i32, @intFromFloat(world_y - camera[1]));
-        if (sy < -1 or sy >= @as(i32, @intCast(Screen.height))) continue;
-
-        var gx: usize = 1;
-        while (gx <= N) : (gx += 1) {
-            const fluid_energy = density[idx(gx, gy)];
-            if (fluid_energy <= 8.0) continue;
-
-            const world_x = @as(f32, @floatFromInt(gx)) * step_world_x;
-            const sx = @as(i32, @intFromFloat(world_x - camera[0]));
-            if (sx < -1 or sx >= @as(i32, @intCast(Screen.width))) continue;
-
-            const color: u8 = if (fluid_energy > 55.0) 7 else if (fluid_energy > 20.0) 6 else 5;
-            setPixel(sx, sy, color);
-            setPixel(sx + 1, sy, color);
-            setPixel(sx, sy + 1, color);
-        }
-    }
+    drawTownMap();
 
     drawRouteDots();
 
@@ -539,8 +660,8 @@ fn renderFrame() void {
 
 export fn init() void {
     player = .{
-        .x = 520.0,
-        .y = 360.0,
+        .x = 416.0,
+        .y = 256.0,
         .vx = 0.0,
         .vy = 0.0,
         .dir = 0.0,
@@ -548,13 +669,14 @@ export fn init() void {
         .step_clock = 0.0,
         .ripple_clock = 0.0,
     };
-    camera = .{ 400.0, 280.0 };
+    camera = .{ 296.0, 176.0 };
     active_house = -1;
     dismissed_house = -1;
     input_axis_x = 0.0;
     input_axis_y = 0.0;
     input_buttons = 0;
     render_clock = 0.0;
+    initTownMap();
     resetFluid();
     resetEffects();
     initPalette();
@@ -715,7 +837,7 @@ fn disturbFluid(world_x: f32, world_y: f32, amount_x: f32, amount_y: f32) void {
 }
 
 fn updatePlayer(dt: f32, input_x_raw: f32, input_y_raw: f32, reduced_motion: bool) void {
-    const was_moving = player.moving > 0.5;
+    _ = reduced_motion;
     var input_x = clamp(input_x_raw, -1.0, 1.0);
     var input_y = clamp(input_y_raw, -1.0, 1.0);
     const input_len = distance(input_x, input_y, 0.0, 0.0);
@@ -739,17 +861,6 @@ fn updatePlayer(dt: f32, input_x_raw: f32, input_y_raw: f32, reduced_motion: boo
     player.y = clamp(player.y + player.vy * dt, 34.0, World.height - 26.0);
     const step_rate: f32 = if (moving) 9.0 else 2.0;
     player.step_clock += dt * step_rate;
-    player.ripple_clock += dt;
-
-    if (moving and player.ripple_clock > 0.11) {
-        player.ripple_clock = 0.0;
-        spawnRipple(player.x, player.y, input_len, reduced_motion);
-        disturbFluid(player.x, player.y, player.vx, player.vy);
-    }
-
-    if (was_moving and !moving) {
-        spawnSplash(player.x, player.y + 8.0, reduced_motion);
-    }
 }
 
 fn updateCamera() void {
@@ -931,8 +1042,6 @@ fn stepFluid() void {
 fn stepGame(dt: f32, input_x: f32, input_y: f32, reduced_motion: bool) void {
     updatePlayer(dt, input_x, input_y, reduced_motion);
     updateCamera();
-    updateEffects(dt);
-    stepFluid();
     updateProximity();
     syncViews();
 }
@@ -982,7 +1091,7 @@ test "init clears game, effects, and fluid state" {
 
     try std.testing.expectEqual(@as(f32, 0), total_density);
     try std.testing.expectEqual(@as(f32, 0), density[idx(1, 1)]);
-    try std.testing.expectEqual(@as(f32, 520), player.x);
+    try std.testing.expectEqual(@as(f32, 416), player.x);
     try std.testing.expect(getActivePortal() == -1);
 }
 

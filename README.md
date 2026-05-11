@@ -1,6 +1,6 @@
 # ZigBio
 
-ZigBio is a static GBA-style bio game. The game core runs in Zig compiled to WebAssembly and now owns movement, camera, proximity, minimap, water rendering, and the RGB555 framebuffer. JavaScript is limited to input forwarding, framebuffer blitting, and navigation UI.
+ZigBio is a static GBA-style bio game. The game core runs in Zig compiled to WebAssembly and now owns movement, camera, proximity, minimap, neighborhood rendering, and the RGB555 framebuffer. JavaScript is limited to input forwarding, framebuffer blitting, and navigation UI.
 
 ## Current Decision
 

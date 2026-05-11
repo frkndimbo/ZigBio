@@ -25,9 +25,9 @@ Performance and authenticity are the priority. Zig is the core game engine, not
 just a helper for movement or fluid math. The current mixed JS renderer is an
 intermediate prototype and must be migrated toward a Zig-owned framebuffer.
 
-Visual direction: use the assets from `../Asset` and build a floating house
-settlement over water. Do not return to a plain empty scene. Do not make the
-world look like a muddy swamp unless explicitly requested later.
+Visual direction: use the assets from `../Asset` and build a dense GBA-style
+neighborhood inspired by Medabots (non-AX). Remove flood/swamp/floating themes.
+Focus on streets, houses, fences, signs, trees, and clear route readability.
 
 ## The 90 Percent GBA Feel - Non-Negotiable Constraints
 
@@ -122,7 +122,7 @@ placement. CSS must not simulate game visuals or game HUD elements.
 - First screen shows the actual playable GBA-style world, not a landing page.
 - Player starts near a useful central location with at least two reachable house
   directions visible or implied.
-- Houses float on water with platforms/docks, not on plain empty water.
+- Houses sit in readable neighborhood blocks connected by streets and signage.
 - The map/minimap must show player position, house markers, and the current view
   rectangle or directional hints.
 - Each house represents a profile portal: LinkedIn, GitHub, TikTok, Instagram,
@@ -183,6 +183,7 @@ placement. CSS must not simulate game visuals or game HUD elements.
 
 ### Phase 3 - Asset Conversion
 
+- [x] Websearch/reference mining >=100 aset GBA-style sebelum eksekusi (`docs/research/gba-asset-references.md`, 369 links).
 - [x] Audit `../Asset/Tilemap/tilemap_packed.png` and selected `../Asset/Tiles`.
 - [x] Select tiles for water props, floating bases, docks, roofs, doors, signs,
   and house bodies.
@@ -201,9 +202,10 @@ placement. CSS must not simulate game visuals or game HUD elements.
 
 - [ ] Tune player acceleration and walking speed for 240 x 160 readability.
 - [ ] Add 4-direction walk animation with 4 frames per direction.
-- [ ] Make water motion visible through palette cycling, not alpha overlays.
+- [x] Remove flood/swamp visual dependency from the main world loop.
 - [ ] Add clear minimap markers so visitors do not get lost.
 - [ ] Tune house placement so the first viewport feels alive but not cluttered.
+- [x] Apply per-portal logo pinpoints (LinkedIn, GitHub, TikTok, Instagram, Portfolio).
 - [ ] Verify touch controls on mobile viewport.
 
 ### Phase 6 - Deployment Readiness
@@ -236,11 +238,11 @@ placement. CSS must not simulate game visuals or game HUD elements.
 ## Definition Of Done
 
 - [x] Browser page boots a WASM game at 240 x 160 internal resolution.
-- [x] Zig owns game update, rendering, camera, collision, water, minimap, and
+- [x] Zig owns game update, rendering, camera, collision, minimap, and
   portal state.
 - [x] JS is limited to WASM loading, input forwarding, framebuffer blitting, and
   external navigation.
-- [ ] Scene uses `../Asset` art for floating houses over water.
+- [ ] Scene uses `../Asset` art for Medabots-inspired neighborhood housing.
 - [ ] Visitors can navigate by looking at the in-game map.
 - [x] ReleaseSmall build succeeds.
 - [x] Unit tests pass.
